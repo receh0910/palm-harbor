@@ -73,10 +73,6 @@ export function createWorld(random) {
   function roadPoint(x, z) {
     // Nearest point on a road centreline.
     let best = null, bd = 1e9;
-    for (const rx of CITY.roads) for (const rz of CITY.roads) {
-      const px = clamp(x, Math.min(rx, rx), Math.max(rx, rx));
-      void px;
-    }
     for (const rx of CITY.roads) {
       const d = Math.abs(x - rx);
       if (d < bd) { bd = d; best = { x: rx, z }; }
@@ -292,7 +288,7 @@ export function createWorld(random) {
   function respawn() {
     const p = state.player;
     p.health = PLAYER.health;
-    p.money = Math.floor(p.money * 0.85);
+    state.money = Math.floor(state.money * 0.85);
     p.x = LANDMARK.hospital.x; p.z = LANDMARK.hospital.z + 20; p.y = 0; p.vy = 0;
     p.angle = 0; p.vx = 0; p.vz = 0; p.speed = 0;
     p.onFoot = true; p.carId = -1; p.driving = false; p.ammo = PLAYER.magSize;
@@ -674,17 +670,17 @@ export function createWorld(random) {
           ctl.throttle = car.speed < targetSpeed ? 1 : 0;
           ctl.brake = car.speed > targetSpeed + 4;
           ctl.steer = clamp(diff * 2.2, -1, 1);
-            // Stuck recovery: if the car is wedged against a building, back up
-            // and turn away instead of grinding into the wall.
-            if (Math.abs(car.speed) < 0.5) {
-              car.stuckT = (car.stuckT || 0) + dt;
-              if (car.stuckT > 2) {
-                ctl.throttle = -1;
-                ctl.steer = -Math.sign(diff || 1);
-                ctl.brake = false;
-                if (car.stuckT > 3.5) car.stuckT = 0;
-              }
-            } else car.stuckT = 0;
+          // Stuck recovery: if the car is wedged against a building, back up
+          // and turn away instead of grinding into the wall.
+          if (Math.abs(car.speed) < 0.5) {
+            car.stuckT = (car.stuckT || 0) + dt;
+            if (car.stuckT > 2) {
+              ctl.throttle = -1;
+              ctl.steer = -Math.sign(diff || 1);
+              ctl.brake = false;
+              if (car.stuckT > 3.5) car.stuckT = 0;
+            }
+          } else car.stuckT = 0;
         }
       } else if (ctl.auto.type === 'walk' && p.onFoot) {
         const dx = ctl.auto.x - p.x, dz = ctl.auto.z - p.z;

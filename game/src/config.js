@@ -101,7 +101,7 @@ export const MISSIONS = [
     brief: 'A courier is driving a loop around the bank block. Stay behind him — close enough to watch, far enough not to be seen.',
     steps: [
       { t: 'tail', secs: 45, label: 'Tail the courier (stay 12–30 m behind)' },
-      { t: 'driveTo', x: 148, z: -148, r: 8, label: 'Report back at the safehouse' },
+      { t: 'driveTo', x: 148, z: -148, r: 16, label: 'Report back at the safehouse' },
     ],
   },
   {
