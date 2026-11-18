@@ -1,6 +1,10 @@
 # Palm Harbor
 
-An original open-world crime game, built for the make.fun **gta6-01** bounty
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/receh0910/palm-harbor/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/receh0910/palm-harbor/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
+An original open-world crime game, built for the [make.fun **gta6-01** bounty](https://make.fun/bounty/gta6-01)
 ("Make GTA 6"). A fictional sun-soaked coastal city you explore on foot and by
 car: steal cars, dodge traffic and pedestrians, lose the Palm Harbor PD, and
 work eight story jobs for Mara Voss's crew — from your first stolen wheels to
