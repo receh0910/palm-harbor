@@ -1,79 +1,76 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Screenshot staging: each named shot resets the world, puts the player in a real game
+// state, and runs the simulation forward so the frame is a genuine moment of play — never
+// a composed mockup. The screenshots are rendered by the same code path as the live game
+// (main.js runShot). Driving uses the world's own autopilot (ctl.auto); entering a car
+// uses the world's tryEnterCar, exactly as a player would.
+import { SCREEN_TITLE, SCREEN_PLAY } from './render.js';
+import { LANDMARK } from './config.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+const STEP = 1 / 60;
+// From the safehouse onto the outer ring road, then around the city.
+const RING = [[185, -128], [185, 185], [-185, 185], [-185, -185], [185, -185]];
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
+function run(world, missions, seconds, ctl) {
+  const n = Math.round(seconds / STEP);
+  for (let i = 0; i < n; i += 1) {
+    world.step(STEP, ctl || {});
+    // The mission only advances when its update runs, just like in the live game.
+    if (missions) missions.update(STEP);
   }
-  return Infinity;
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
+function driveOff(world, missions, seconds) {
+  // The parked car by the safehouse is mission 1's car; get in and drive the ring.
+  const st = world.state;
+  let car = null, bd = 1e9;
+  for (const c of st.cars) {
+    if (c.kind !== 'parked' || c.hp <= 0) continue;
+    const d = Math.hypot(c.x - 148, c.z + 128);
+    if (d < bd) { bd = d; car = c; }
   }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
+  if (car) {
+    st.player.x = car.x - 2.5;
+    st.player.z = car.z;
+    st.player.angle = Math.atan2(car.x - st.player.x, car.z - st.player.z);
+    world.tryEnterCar();
   }
-  return best;
+  run(world, missions, seconds, { auto: { type: 'drive', points: RING, idx: 0 } });
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+export function stageShot(name, world, missions) {
+  const st = world.state;
+  if (name === 'start') {
+    world.reset();
+    // On the beach road, city ahead, a car parked beside the player.
+    st.player.x = 2; st.player.z = 208; st.player.angle = Math.PI;
+    const car = st.cars.find((c) => c.kind === 'parked' && c.hp > 0);
+    if (car) { car.x = 10; car.z = 204; car.angle = Math.PI; }
+    run(world, missions, 3, {});
+    return {
+      screen: SCREEN_TITLE,
+      pose: { pos: [28, 18, 232], look: [0, 8, 60] },
+    };
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+  if (name === 'drive') {
+    world.reset();
+    driveOff(world, missions, 8);
+    return { screen: SCREEN_PLAY, pose: null };
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  if (name === 'chase') {
+    world.reset();
+    driveOff(world, missions, 2);
+    world.setWanted(3);
+    run(world, missions, 6, { auto: { type: 'drive', points: RING, idx: 0 } });
+    return { screen: SCREEN_PLAY, pose: null };
+  }
+  if (name === 'mission') {
+    world.reset();
+    missions.startMission(5); // The Getaway: the bank job, beacon by the bank door.
+    const bank = LANDMARK.bank;
+    st.player.x = bank.x + 4; st.player.z = 26;
+    st.player.angle = Math.atan2(bank.x - st.player.x, bank.z - st.player.z);
+    run(world, missions, 5, {});
+    return { screen: SCREEN_PLAY, pose: null };
+  }
+  throw new Error(`unknown shot: ${name}`);
 }

@@ -1,53 +1,68 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard and pointer input for the 3D game. Held keys give a move vector; one-shot presses
+// (confirm, pause, enter car, melee, reload) are queued as bit flags and taken once by the loop,
+// so a press between two frames is never lost and never counted twice. Dragging orbits the
+// camera; the wheel zooms it; holding the mouse button fires the pistol while on foot.
 
 export const ACTION_CONFIRM = 1;
 export const ACTION_PAUSE = 2;
+export const ACTION_ENTER = 4;
+export const ACTION_MELEE = 8;
+export const ACTION_RELOAD = 16;
+export const ACTION_MUTE = 32;
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+const UP = new Set(['KeyW', 'ArrowUp']);
+const DOWN = new Set(['KeyS', 'ArrowDown']);
+const LEFT = new Set(['KeyA', 'ArrowLeft']);
+const RIGHT = new Set(['KeyD', 'ArrowRight']);
 
 export function createInput(target) {
-  let left = false;
-  let right = false;
+  const keys = new Set();
   let actions = 0;
+  let lookX = 0, lookY = 0, zoom = 0;
+  let firing = false;
+  let dragging = false;
+  let lastX = 0, lastY = 0;
 
   window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+    if (event.repeat) { if (UP.has(event.code) || DOWN.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) event.preventDefault(); return; }
+    keys.add(event.code);
+    if (event.code === 'Enter' || event.code === 'Space') actions |= ACTION_CONFIRM;
+    else if (event.code === 'KeyP' || event.code === 'Escape') actions |= ACTION_PAUSE;
+    else if (event.code === 'KeyE') actions |= ACTION_ENTER;
+    else if (event.code === 'KeyF') actions |= ACTION_MELEE;
+    else if (event.code === 'KeyR') actions |= ACTION_RELOAD;
+    else if (event.code === 'KeyM') actions |= ACTION_MUTE;
+    if (UP.has(event.code) || DOWN.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code) || event.code === 'Space') event.preventDefault();
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+  window.addEventListener('keyup', (event) => keys.delete(event.code));
+  window.addEventListener('blur', () => { keys.clear(); firing = false; dragging = false; });
+
+  target.addEventListener('pointerdown', (event) => {
+    if (event.button === 0) { firing = true; dragging = true; lastX = event.clientX; lastY = event.clientY; }
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
+  window.addEventListener('pointerup', (event) => { if (event.button === 0) { firing = false; dragging = false; } });
+  window.addEventListener('pointermove', (event) => {
+    if (!dragging) return;
+    lookX += event.clientX - lastX;
+    lookY += event.clientY - lastY;
+    lastX = event.clientX; lastY = event.clientY;
   });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+  window.addEventListener('wheel', (event) => { zoom += event.deltaY; }, { passive: true });
+
+  const has = (set) => { for (const code of set) if (keys.has(code)) return true; return false; };
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    /** Camera-relative move: x right, z forward (both -1..1). */
+    move() {
+      return { x: (has(RIGHT) ? 1 : 0) - (has(LEFT) ? 1 : 0), z: (has(UP) ? 1 : 0) - (has(DOWN) ? 1 : 0) };
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
+    run() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); },
+    jump() { return keys.has('Space'); },
+    brake() { return keys.has('Space'); },
+    firing() { return firing; },
+    /** Drag deltas since the last call, in pixels. */
+    takeLook() { const d = { x: lookX, y: lookY }; lookX = 0; lookY = 0; return d; },
+    takeZoom() { const z = zoom; zoom = 0; return z; },
+    takeActions() { const taken = actions; actions = 0; return taken; },
   };
 }

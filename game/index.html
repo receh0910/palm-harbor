@@ -3,17 +3,117 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<title>Palm Harbor</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1420; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; color: #fff; }
+  .panel { background: rgba(10, 16, 26, 0.62); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 10px; padding: 8px 12px; }
+  #hud-tl { position: absolute; top: 14px; left: 14px; }
+  #health-bar { width: 180px; height: 14px; background: rgba(0, 0, 0, 0.55); border-radius: 7px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.25); }
+  #health-fill { height: 100%; width: 100%; background: #58d158; }
+  #health-text { font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+  #money { margin-top: 6px; font-size: 20px; font-weight: 800; color: #ffd34d; text-shadow: 0 1px 3px #000; }
+  #stars { position: absolute; top: 14px; right: 14px; font-size: 26px; letter-spacing: 2px; color: rgba(255, 255, 255, 0.35); text-shadow: 0 1px 3px #000; }
+  #stars.hot { color: #ffd34d; }
+  #obj { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: min(430px, 60vw); text-align: center; }
+  #obj-title { font-size: 14px; font-weight: 800; letter-spacing: 0.4px; }
+  #obj-text { font-size: 13px; opacity: 0.92; margin-top: 2px; }
+  #obj-bar { height: 6px; background: rgba(255, 255, 255, 0.18); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  #obj-fill { height: 100%; width: 0%; background: #ffd34d; }
+  #minimap { position: absolute; right: 14px; bottom: 14px; width: 200px; height: 200px; border: 2px solid rgba(255, 255, 255, 0.35); border-radius: 8px; background: #10141a; }
+  #hud-bl { position: absolute; left: 14px; bottom: 14px; text-shadow: 0 1px 3px #000; }
+  #speed { font-size: 26px; font-weight: 800; }
+  #ammo { font-size: 15px; font-weight: 700; margin-top: 2px; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 50%; display: none; }
+  #crosshair::after { content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; background: #fff; border-radius: 50%; }
+  #vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(200, 20, 20, 0.55) 100%); opacity: 0; }
+  #toast { position: absolute; left: 50%; top: 34%; transform: translateX(-50%); max-width: 80vw; text-align: center; font-size: 22px; font-weight: 800; text-shadow: 0 2px 6px #000; opacity: 0; transition: opacity 0.3s; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(8, 12, 20, 0.72); z-index: 10; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .overlay.show { opacity: 1; pointer-events: auto; }
+  .card { background: rgba(16, 22, 34, 0.94); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; padding: 28px 34px; max-width: 580px; width: calc(100vw - 48px); color: #eef2f6; text-align: center; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+  .card h1 { margin: 0 0 4px; font-size: 44px; letter-spacing: 6px; color: #ffd34d; }
+  .card h2 { margin: 0 0 8px; font-size: 32px; letter-spacing: 3px; color: #ffd34d; }
+  .card p { margin: 10px 0; line-height: 1.5; opacity: 0.92; }
+  .tagline { font-style: italic; opacity: 0.75; }
+  .btn { display: inline-block; padding: 12px 24px; margin: 8px 4px 0; border: none; border-radius: 10px; background: #ffd34d; color: #1a1a1a; font-weight: 800; font-size: 16px; cursor: pointer; }
+  .btn.secondary { background: transparent; border: 1px solid rgba(255, 255, 255, 0.45); color: #fff; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; text-align: left; font-size: 13px; margin: 16px auto 4px; max-width: 460px; opacity: 0.85; }
+  .controls b { color: #ffd34d; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
+<canvas id="game" aria-label="Palm Harbor: an open-world crime game. Drive, walk, take cars, do jobs, lose the police."></canvas>
+
+<div id="hud">
+  <div id="hud-tl">
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="health-text">100</div>
+    <div id="money">$0</div>
+  </div>
+  <div id="stars">☆☆☆☆☆</div>
+  <div id="obj" class="panel">
+    <div id="obj-title">Palm Harbor</div>
+    <div id="obj-text">Loading…</div>
+    <div id="obj-bar"><div id="obj-fill"></div></div>
+  </div>
+  <canvas id="minimap" width="200" height="200"></canvas>
+  <div id="hud-bl">
+    <div id="speed"></div>
+    <div id="ammo"></div>
+  </div>
+  <div id="crosshair"></div>
+  <div id="vignette"></div>
+  <div id="toast"></div>
+</div>
+
+<div id="title-screen" class="overlay">
+  <div class="card">
+    <h1>PALM HARBOR</h1>
+    <p class="tagline">Sun, salt, and everybody owes somebody.</p>
+    <p>Mara Voss runs the crew — and she just hired you, Rex Dalton, wheelman. Eight jobs stand between you and the big score.</p>
+    <div class="controls">
+      <div><b>W A S D</b> — move / drive</div><div><b>Shift</b> — run</div>
+      <div><b>Space</b> — jump / brake</div><div><b>E</b> — take / leave a car</div>
+      <div><b>F</b> — punch</div><div><b>Mouse</b> — aim &amp; shoot (click)</div>
+      <div><b>R</b> — reload</div><div><b>Drag</b> — orbit camera, <b>wheel</b> — zoom</div>
+      <div><b>P</b> — pause</div><div><b>M</b> — mute</div>
+    </div>
+    <button id="btn-start" class="btn">Start new game</button>
+    <button id="btn-continue" class="btn secondary">Continue</button>
+    <p class="tagline">A fictional city. All names, characters and places are invented.</p>
+  </div>
+</div>
+
+<div id="pause-screen" class="overlay">
+  <div class="card">
+    <h2>PAUSED</h2>
+    <p>The city waits for no one — except right now.</p>
+    <button id="btn-resume" class="btn">Resume</button>
+    <button id="btn-quit-title" class="btn secondary">Quit to title</button>
+  </div>
+</div>
+
+<div id="busted-screen" class="overlay">
+  <div class="card">
+    <h2>BUSTED</h2>
+    <p>Rex is down. The crew drags you to the hospital — they take 15% of your cash for the trouble.</p>
+    <button id="btn-respawn" class="btn">Respawn at the hospital</button>
+  </div>
+</div>
+
+<div id="end-screen" class="overlay">
+  <div class="card">
+    <h2>THE BIG SCORE</h2>
+    <p>The van is gone, the money is clean, and Palm Harbor is yours, Rex. Free roam — the city stays open.</p>
+    <button id="btn-freeroam" class="btn">Keep playing (free roam)</button>
+    <button id="btn-quit-title-2" class="btn secondary">Back to title</button>
+  </div>
+</div>
+
 <p id="status" role="status" aria-live="polite"></p>
+<script src="./vendor/three.min.js"></script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
