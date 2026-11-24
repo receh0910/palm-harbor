@@ -53,7 +53,7 @@ three.js vendored under `game/vendor/`. Keyboard and mouse.
 2. **The Pickup** ($250) — collect Maya at the plaza, drop her at the marina.
 3. **Hot Cargo** ($400) — collect three crates, deliver them to the harbor pier.
 4. **Tail the Mark** ($500) — shadow the courier for 45 s without being seen.
-5. **Shake the Heat** ($600) — lose a 3-star wanted level, then respray.
+5. **Shake the Heat** ($600) — lose a 3-star wanted level, then get the car resprayed.
 6. **The Getaway** ($900) — grab the bag at the bank, escape to the safehouse.
 7. **Harbor Run** ($1,200) — race three Vulture drivers through five checkpoints.
 8. **The Big Score** ($2,500) — steal the armored van and bring it to the pier.
