@@ -35,9 +35,39 @@ function fail(message) {
   throw new Error(`Palm Harbor build: ${message}`);
 }
 
+// Cycle 2 systems: weather, side jobs, story jobs 9–11 and boats must ship
+// with the entry — a missing module would leave main.js importing a file
+// that is not there, so the build refuses outright instead of shipping a
+// game that cannot load.
+const NEW_SYSTEMS = ['weather.js', 'sidejobs.js', 'missions2.js', 'boats.js'];
+
+function checkNewSystems() {
+  for (const name of NEW_SYSTEMS) {
+    const p = join(here, 'game', 'src', name);
+    if (!existsSync(p)) fail(`game/src/${name} is missing (cycle 2 system)`);
+    const size = statSync(p).size;
+    if (size < 1000) fail(`game/src/${name} is only ${size} bytes, expected a full system`);
+  }
+}
+
+// The feature manifest: what cycle 2 added over the first submission, so a
+// reviewer can see the new systems without diffing the source.
+const FEATURES = [
+  { id: 'weather', title: 'Day/night cycle and weather', detail: 'An 8-minute day, drifting clear/cloud/rain/storm skies; rain cuts grip and visibility, night darkens the city.' },
+  { id: 'side-jobs', title: 'Taxi fares and delivery runs', detail: 'Four taxi stands and a harbor delivery depot pay between story jobs; fares surge in the rain.' },
+  { id: 'story-2', title: 'Story jobs 9–11', detail: 'Night Run, Storm Chase and Harbor Heist unlock after the first eight jobs, ending in a boat escape.' },
+  { id: 'boats', title: 'Drivable boats', detail: 'Three boats at the pier and the east docks; board with E, throttle and steer on open water.' },
+  { id: 'harbor-district', title: 'East dock yard', detail: 'Container stacks, three cranes and two walkable timber docks east of the pier.' },
+];
+
+function writeFeatures() {
+  writeFileSync(join(outDir, 'features.json'), JSON.stringify({ game: 'Palm Harbor', features: FEATURES }, null, 2));
+}
+
 function checkEntryFiles() {
   const index = join(here, 'game', 'index.html');
   if (!existsSync(index)) fail('game/index.html is missing');
+  checkNewSystems();
   const shotsDir = join(here, 'screenshots');
   if (!existsSync(shotsDir)) return;
   const shots = readdirSync(shotsDir).filter((name) => statSync(join(shotsDir, name)).isFile());
@@ -75,6 +105,7 @@ function copyEntry() {
 
 checkEntryFiles();
 copyEntry();
+writeFeatures();
 const dossierPath = join(outDir, 'dossier.json');
 writeFileSync(dossierPath, buildDossier(outDir, DOSSIER_LIMITS));
 console.log(`Palm Harbor built: ${dossierPath} (${statSync(dossierPath).size} bytes)`);

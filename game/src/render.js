@@ -4,6 +4,8 @@
 // renderer owns the camera yaw, which main.js reads to turn keyboard input
 // into world-space movement.
 import { CITY, PALETTE } from './config.js';
+import { fogFactor, weatherLabel } from './weather.js';
+import { boatHudLine } from './boats.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
@@ -178,6 +180,40 @@ function buildCarMesh(color, kind) {
   return g;
 }
 
+  // Drivable boats: a speedboat hull with a windshield, a trawler with a
+  // cabin and a mast. The two decorative boats by the pier use the local
+  // boat() builder below; these are the ones the player can board.
+  function buildBoatMesh(color, kind) {
+    const g = new THREE.Group();
+    const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 8.5), mat(color));
+    hull.position.y = 0.5;
+    hull.castShadow = true;
+    g.add(hull);
+    const bow = new THREE.Mesh(new THREE.ConeGeometry(1.6, 2.4, 4), mat(color));
+    bow.rotation.x = Math.PI / 2;
+    bow.rotation.y = Math.PI / 4;
+    bow.position.set(0, 0.5, 5.2);
+    g.add(bow);
+    if (kind === 'trawler') {
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.4, 3), mat(0xf2f2f2));
+      cabin.position.set(0, 1.7, -1.2);
+      cabin.castShadow = true;
+      g.add(cabin);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 6, 6), mat(0x8a6a42));
+      mast.position.set(0, 4.2, 0.6);
+      g.add(mast);
+    } else {
+      const shield = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.3), new THREE.MeshLambertMaterial({ color: 0x223344 }));
+      shield.position.set(0, 1.4, 1.6);
+      g.add(shield);
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 1.6), mat(0x2c3e50));
+      seat.position.set(0, 1.1, -0.6);
+      g.add(seat);
+    }
+    return g;
+  }
+
 export function createRenderer(canvas, world, missions) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -300,6 +336,36 @@ export function createRenderer(canvas, world, missions) {
     post.position.set(x, 0.5, z);
     scene.add(post);
   }
+  // East dock yard: container stacks, cranes and two timber docks.
+  for (const c of world.city.containers) {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(c.w, c.h, c.d), new THREE.MeshLambertMaterial({ color: c.color }));
+    box.position.set(c.x, c.h / 2, c.z);
+    box.castShadow = true;
+    box.receiveShadow = true;
+    scene.add(box);
+  }
+  const craneMat = new THREE.MeshLambertMaterial({ color: 0xf1c40f });
+  const craneDark = new THREE.MeshLambertMaterial({ color: 0x3a3f46 });
+  for (const cr of world.city.cranes) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(2, cr.h, 2), craneDark);
+    leg.position.set(cr.x, cr.h / 2, cr.z);
+    leg.castShadow = true;
+    scene.add(leg);
+    const jib = new THREE.Mesh(new THREE.BoxGeometry(cr.arm, 1.2, 1.2), craneMat);
+    jib.position.set(cr.x + cr.arm / 2 - 4, cr.h, cr.z);
+    scene.add(jib);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 4), craneMat);
+    cab.position.set(cr.x, cr.h - 1.5, cr.z);
+    scene.add(cab);
+  }
+  for (const d of world.city.docks) {
+    for (let z = d.z0; z < d.z1; z += 4) {
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(d.w, 0.5, 3.6), pierMat);
+      plank.position.set(d.x, 0.4, z);
+      plank.receiveShadow = true;
+      scene.add(plank);
+    }
+  }
   function boat(x, z, color) {
     const g = new THREE.Group();
     const hull = new THREE.Mesh(new THREE.BoxGeometry(4, 1.4, 10), new THREE.MeshLambertMaterial({ color }));
@@ -330,6 +396,21 @@ export function createRenderer(canvas, world, missions) {
     scene.add(c);
     clouds.push(c);
   }
+  // Rain: a sheet of falling drops around the player, shown only while the
+  // weather module reports rain. Positions recycle from the top.
+  const RAIN_DROPS = 500;
+  const rainGeo = new THREE.BufferGeometry();
+  const rainPos = new Float32Array(RAIN_DROPS * 3);
+  for (let i = 0; i < RAIN_DROPS; i += 1) {
+    rainPos[i * 3] = (Math.random() - 0.5) * 120;
+    rainPos[i * 3 + 1] = Math.random() * 40;
+    rainPos[i * 3 + 2] = (Math.random() - 0.5) * 120;
+  }
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  const rain = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: 0xaaccee, size: 0.35, transparent: true, opacity: 0.5 }));
+  rain.visible = false;
+  rain.frustumCulled = false;
+  scene.add(rain);
 
   // ---- dynamic entities ----
   const playerFig = buildPerson(PALETTE.playerShirt, PALETTE.playerPants, 0xe8b88a);
@@ -341,6 +422,7 @@ export function createRenderer(canvas, world, missions) {
   const pedMeshes = new Map();
   const copMeshes = new Map();
   const crateMeshes = new Map();
+  const boatMeshes = new Map();
 
   const beaconMat = new THREE.MeshBasicMaterial({ color: PALETTE.beacon, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
   const beacon = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 34, 12, 1, true), beaconMat);
@@ -367,6 +449,11 @@ export function createRenderer(canvas, world, missions) {
     vignette: el('vignette'),
     toast: el('toast'),
     minimap: el('minimap'),
+    weatherText: el('weather-text'),
+    jobPanel: el('job-panel'),
+    jobText: el('job-text'),
+    jobFill: el('job-fill'),
+    boatInfo: el('boat-info'),
   };
   const mm = hud.minimap ? hud.minimap.getContext('2d') : null;
   let lastHud = { hp: -1, money: -1, stars: -1, obj: '', ammo: -1, speed: -1 };
@@ -378,6 +465,9 @@ export function createRenderer(canvas, world, missions) {
   let camDist = 10;
   const camPos = new THREE.Vector3(148, 30, -90);
   let titleAngle = 0;
+  // Optional live systems the game wires in after creation (weather, side
+  // jobs, story part 2, boats). Null until main.js calls setExtras().
+  let extras = null;
 
   function resize() {
     const w = window.innerWidth;
@@ -443,6 +533,35 @@ export function createRenderer(canvas, world, missions) {
       mm.fillStyle = '#ff4444';
       mm.fillRect(mx(cop.x) - 2, mz(cop.z) - 2, 3, 3);
     }
+    // Side-job target and taxi stands, drivable boats, story part 2 marker.
+    if (extras && extras.sideJobs) {
+      const jm = extras.sideJobs.marker();
+      if (jm) {
+        mm.fillStyle = '#2ecc71';
+        mm.beginPath();
+        mm.arc(mx(jm.x), mz(jm.z), 5, 0, TAU);
+        mm.fill();
+      }
+      mm.fillStyle = '#f1c40f';
+      for (const s of extras.sideJobs.stands()) {
+        mm.fillRect(mx(s.x) - 2, mz(s.z) - 2, 4, 4);
+      }
+    }
+    if (extras && extras.boats) {
+      mm.fillStyle = '#7fd3ff';
+      for (const b of extras.boats.list()) {
+        mm.fillRect(mx(b.x) - 2, mz(b.z) - 2, 5, 5);
+      }
+    }
+    if (extras && extras.story2) {
+      const mk2 = extras.story2.marker();
+      if (mk2) {
+        mm.fillStyle = '#ff9f1c';
+        mm.beginPath();
+        mm.arc(mx(mk2.x), mz(mk2.z), 5, 0, TAU);
+        mm.fill();
+      }
+    }
     // Player arrow.
     mm.save();
     mm.translate(mx(p.x), mz(p.z));
@@ -496,13 +615,30 @@ export function createRenderer(canvas, world, missions) {
     hud.crosshair.style.display = (screen === SCREEN_PLAY && p.onFoot) ? 'block' : 'none';
     const hurt = clampNum(1 - (st.time - p.lastHurtT) * 1.2, 0, 1);
     hud.vignette.style.opacity = String(hurt * 0.55);
+    // New-system HUD: weather clock, side-job panel, boat speed.
+    if (extras && extras.weather && hud.weatherText) {
+      hud.weatherText.textContent = weatherLabel(extras.weather.hud());
+    }
+    if (hud.jobPanel) {
+      const job = extras && extras.sideJobs ? extras.sideJobs.hud() : null;
+      if (job && job.active) {
+        hud.jobPanel.style.display = 'block';
+        hud.jobText.textContent = `${job.label}${job.timeLeft ? ` — ${job.timeLeft}s` : ''}`;
+        if (hud.jobFill) hud.jobFill.style.width = `${Math.round((job.progress || 0) * 100)}%`;
+      } else {
+        hud.jobPanel.style.display = 'none';
+      }
+    }
+    if (hud.boatInfo) {
+      hud.boatInfo.textContent = extras && extras.boats ? boatHudLine(extras.boats) : '';
+    }
   }
 
   function syncMeshes(t, dt, screen) {
     const st = world.state;
     const p = st.player;
-    // Player figure.
-    playerFig.visible = p.onFoot;
+    // Player figure: hidden while driving a boat (the boat carries them).
+    playerFig.visible = p.onFoot && !(extras && extras.boats && extras.boats.isPlayerOnBoat());
     if (p.onFoot) {
       playerFig.position.set(p.x, p.y, p.z);
       playerFig.rotation.y = p.angle;
@@ -608,6 +744,30 @@ export function createRenderer(canvas, world, missions) {
         crateMeshes.delete(crate);
       }
     }
+    // Drivable boats (extras.boats): moored boats bob gently, the player's
+    // boat heels a little with speed.
+    if (extras && extras.boats) {
+      const seenBoats = new Set();
+      for (const b of extras.boats.list()) {
+        seenBoats.add(b.id);
+        let mesh = boatMeshes.get(b.id);
+        if (!mesh) {
+          mesh = buildBoatMesh(b.color, b.kind);
+          boatMeshes.set(b.id, mesh);
+          scene.add(mesh);
+        }
+        mesh.position.set(b.x, Math.sin(b.bob) * 0.12, b.z);
+        mesh.rotation.y = b.angle;
+        mesh.rotation.z = Math.sin(b.bob * 0.7) * 0.02;
+        mesh.visible = true;
+      }
+      for (const [id, mesh] of boatMeshes) {
+        if (!seenBoats.has(id)) {
+          scene.remove(mesh);
+          boatMeshes.delete(id);
+        }
+      }
+    }
     // Marker beacon + diamond.
     const mk = missions.marker();
     const showBeacon = !!mk && screen === SCREEN_PLAY;
@@ -629,6 +789,26 @@ export function createRenderer(canvas, world, missions) {
       if (c.position.x > 300) c.position.x = -300;
     }
     for (const b of boats) b.position.y = Math.sin(t * 0.8 + b.position.x) * 0.15 - 0.2;
+    // Rain falls around the player and recycles from the top of its box.
+    if (extras && extras.weather) {
+      const w = extras.weather.hud();
+      rain.visible = w.rain > 0.05;
+      if (rain.visible) {
+        rain.position.set(p.x, 0, p.z);
+        const fall = 55 * dt;
+        for (let i = 0; i < RAIN_DROPS; i += 1) {
+          rainPos[i * 3 + 1] -= fall;
+          if (rainPos[i * 3 + 1] < 0) {
+            rainPos[i * 3 + 1] = 40;
+            rainPos[i * 3] = (Math.random() - 0.5) * 120;
+            rainPos[i * 3 + 2] = (Math.random() - 0.5) * 120;
+          }
+        }
+        rainGeo.attributes.position.needsUpdate = true;
+      }
+    } else {
+      rain.visible = false;
+    }
   }
 
   function draw(screen, shotPose, dt) {
@@ -670,10 +850,25 @@ export function createRenderer(canvas, world, missions) {
       );
       camera.lookAt(tx, 1.6, tz);
     }
+    // Weather paints the sky: night darkens it, rain greys it, and the fog
+    // closes in with both. The sun dims after dark.
+    if (extras && extras.weather) {
+      const w = extras.weather.hud();
+      const sky = new THREE.Color(PALETTE.sky).lerp(new THREE.Color(0x0e1420), w.night).lerp(new THREE.Color(0x6a7a8a), w.rain * 0.6);
+      scene.background.copy(sky);
+      scene.fog.color.copy(sky);
+      scene.fog.far = 720 * fogFactor(w);
+      scene.fog.near = 160 * fogFactor(w);
+      sun.intensity = 1.15 * (1 - w.night * 0.75) * (1 - w.rain * 0.35);
+    }
     renderer.render(scene, camera);
     drawHud(screen);
     drawMinimap();
   }
 
-  return { draw, resize, applyLook, applyZoom, getYaw: () => camYaw - Math.PI };
+  return {
+    draw, resize, applyLook, applyZoom, getYaw: () => camYaw - Math.PI,
+    setExtras(e) { extras = e; },
+    getExtras: () => extras,
+  };
 }

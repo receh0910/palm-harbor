@@ -21,6 +21,10 @@ import {
 } from './render.js';
 import { createMissions } from './missions.js';
 import { createAudio } from './audio.js';
+import { createWeather } from './weather.js';
+import { createSideJobs } from './sidejobs.js';
+import { createStory2 } from './missions2.js';
+import { createBoats } from './boats.js';
 import { stageShot } from './shots.js';
 
 const MAX_FRAME = 0.25;
@@ -36,6 +40,13 @@ const world = createWorld(createRandom(seed));
 const missions = createMissions(world);
 const renderer = createRenderer(canvas, world, missions);
 const audio = createAudio();
+// Cycle 2 systems: weather and the clock, the drivable boats, side jobs,
+// and story jobs 9–11 (standby until the first eight are done).
+const weather = createWeather(world);
+const boats = createBoats(world);
+const sideJobs = createSideJobs(world, weather);
+const story2 = createStory2(world, boats, weather);
+renderer.setExtras({ weather, sideJobs, story2, boats });
 
 function runShot(name) {
   const scene = stageShot(name, world, missions);
@@ -59,10 +70,11 @@ function runGame() {
   let last = performance.now();
   let toastTimer = 0;
   let lastTitle = '';
+  let boatCtl = {};
 
   function refreshTabTitle() {
-    const cur = missions.current();
-    const title = cur ? `Palm Harbor — Job ${cur.missionIndex + 1}/8: ${cur.title}` : 'Palm Harbor';
+    const cur = missions.done ? story2.current() : missions.current();
+    const title = cur ? `Palm Harbor — Job ${cur.missionIndex + 1}/11: ${cur.title}` : 'Palm Harbor';
     if (title !== lastTitle) {
       document.title = title;
       lastTitle = title;
@@ -90,7 +102,10 @@ function runGame() {
 
   function saveGame() {
     try {
-      window.localStorage.setItem(SAVE_KEY, JSON.stringify({ ...world.getSave(), ...missions.getSave() }));
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify({
+        ...world.getSave(), ...missions.getSave(), ...weather.getSave(),
+        ...boats.getSave(), ...sideJobs.getSave(), ...story2.getSave(),
+      }));
     } catch {
       /* storage off: the save lasts this visit only */
     }
@@ -108,6 +123,9 @@ function runGame() {
     audio.unlock();
     world.reset();
     missions.startMission(0);
+    weather.reset();
+    boats.reset();
+    sideJobs.reset();
     accumulator = 0;
     screen = SCREEN_PLAY;
     showScreen(null);
@@ -124,6 +142,10 @@ function runGame() {
     world.reset();
     world.loadSave(save);
     missions.loadSave(save);
+    weather.loadSave(save);
+    boats.loadSave(save);
+    sideJobs.loadSave(save);
+    story2.loadSave(save);
     accumulator = 0;
     screen = SCREEN_PLAY;
     showScreen(null);
@@ -180,10 +202,42 @@ function runGame() {
     if (m.completed) {
       audio.chime();
       saveGame();
-      if (missions.done) {
+      toast(`Job complete: ${m.title}  +$${m.reward}${missions.done ? ' — three more jobs wait at the harbor.' : ''}`);
+    }
+  }
+
+  function handleSideJob(j) {
+    if (!j) return;
+    if (j.started) toast(j.message, 4);
+    if (j.stepDone) {
+      audio.pickup();
+      toast(j.message, 4);
+    }
+    if (j.completed) {
+      audio.chime();
+      saveGame();
+      toast(j.message, 4);
+    }
+    if (j.failed) {
+      audio.fail();
+      toast(j.message, 4);
+    }
+  }
+
+  function handleStory2(m) {
+    if (!m) return;
+    if (m.stepDone) audio.pickup();
+    if (m.failed) {
+      audio.fail();
+      toast(`Job failed: ${m.why}`);
+    }
+    if (m.completed) {
+      audio.chime();
+      saveGame();
+      if (story2.done) {
         screen = SCREEN_OVER;
         showScreen('end-screen');
-        say('All eight jobs done. Palm Harbor is yours.');
+        say('All eleven jobs done. Palm Harbor is yours.');
       } else {
         toast(`Job complete: ${m.title}  +$${m.reward}`);
       }
@@ -213,6 +267,10 @@ function runGame() {
         p.angle = yaw;
         handleEvents(world.shoot(fx, fz));
       }
+    } else if (boats.isPlayerOnBoat()) {
+      // Afloat: the boat module drives the player, the world gets no input.
+      boatCtl = { throttle: move.z, steer: move.x, brake: input.brake() };
+      return {};
     } else {
       ctl.throttle = move.z;
       ctl.steer = move.x;
@@ -225,6 +283,15 @@ function runGame() {
     const events = world.step(STEP, readCtl());
     handleEvents(events);
     handleMission(missions.update(STEP));
+    // Cycle 2 systems run on the same clock as the world.
+    weather.update(STEP);
+    handleSideJob(sideJobs.update(STEP));
+    if (missions.done && !story2.armed && !story2.done) {
+      story2.startMission(0);
+      toast('Three more jobs wait at the harbor — Job 9: Night Run.', 5);
+    }
+    handleStory2(story2.update(STEP));
+    boats.update(STEP, boatCtl);
     audio.siren(world.state.wanted > 0);
     const pc = world.playerCar();
     if (pc && !world.state.player.onFoot) audio.engine(Math.min(1, Math.abs(pc.speed) / CAR.maxSpeed));
@@ -250,7 +317,18 @@ function runGame() {
         showScreen('pause-screen');
         say('Paused.');
       } else if (actions & ACTION_ENTER) {
-        handleEvents(world.state.player.onFoot ? world.tryEnterCar() : world.exitCar());
+        const p = world.state.player;
+        if (boats.isPlayerOnBoat()) {
+          if (boats.exitBoat()) {
+            audio.click();
+            toast('You docked the boat.');
+          }
+        } else if (p.onFoot && boats.tryBoard()) {
+          audio.click();
+          toast('You boarded the boat. W/S throttle, A/D steer.');
+        } else {
+          handleEvents(p.onFoot ? world.tryEnterCar() : world.exitCar());
+        }
       } else if (actions & ACTION_MELEE) {
         handleEvents(world.melee());
       } else if (actions & ACTION_RELOAD) {

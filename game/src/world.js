@@ -36,7 +36,7 @@ function pickRandom(rnd, arr) {
 }
 
 export function createWorld(random) {
-  const city = { buildings: [], colliders: [], palms: [], lamps: [], parks: [] };
+  const city = { buildings: [], colliders: [], palms: [], lamps: [], parks: [], docks: [], cranes: [], containers: [] };
   const state = {
     time: 0,
     money: 0,
@@ -71,6 +71,9 @@ export function createWorld(random) {
     city.palms.length = 0;
     city.lamps.length = 0;
     city.parks.length = 0;
+    city.docks.length = 0;
+    city.cranes.length = 0;
+    city.containers.length = 0;
     const C = CITY.centres;
     for (const bx of C) {
       for (const bz of C) {
@@ -122,6 +125,28 @@ export function createWorld(random) {
       for (const rz of CITY.roads) {
         if (random() < 0.6) city.lamps.push({ x: rx + 8, z: rz + 8 });
       }
+    }
+    // East dock yard: container stacks on the beach, three cranes, and two
+    // timber docks reaching into the sea. The aisles between the stacks
+    // (x 52–68 and 102–118) stay open so the heist crates can be reached,
+    // and the docks are walkable (see advancePlayer's dock strips) so the
+    // moored boats can be boarded.
+    const CONTAINER_COLORS = [0xc0392b, 0x2980b9, 0x27ae60, 0xe67e22, 0x8e44ad];
+    for (const cx of [44, 72, 100, 128]) {
+      for (const cz of [198, 212]) {
+        if (random() < 0.25) continue;
+        const h = 2.6 + random() * 2.6;
+        const color = CONTAINER_COLORS[Math.floor(random() * CONTAINER_COLORS.length)];
+        city.containers.push({ x: cx, z: cz, w: 12, d: 6, h, color });
+        city.colliders.push({ x: cx, z: cz, hw: 6, hd: 3 });
+      }
+    }
+    for (const cx of [40, 84, 128]) {
+      city.cranes.push({ x: cx, z: 226, h: 34 + random() * 8, arm: 26 });
+      city.colliders.push({ x: cx, z: 226, hw: 2.5, hd: 2.5 });
+    }
+    for (const dx of [60, 110]) {
+      city.docks.push({ x: dx, z0: 224, z1: 296, w: 10 });
     }
   }
 
@@ -265,6 +290,7 @@ export function createWorld(random) {
     state.rivals.length = 0;
     state.van = null;
     state.mission = 0;
+    state.weather = null;
     carSeq = 0;
     const p = state.player;
     p.x = 148;
@@ -286,6 +312,7 @@ export function createWorld(random) {
     p.carId = -1;
     p.walkPhase = 0;
     p.driving = false;
+    p.boatId = -1;
     populateTraffic();
     populatePeds();
   }
@@ -598,14 +625,17 @@ export function createWorld(random) {
       p.vy -= PLAYER.gravity * dt;
       p.y = Math.max(0, p.y + p.vy * dt);
       if (p.y === 0) p.vy = 0;
-      // World bounds (pier lets the player walk out over the sea).
+      // World bounds (pier and the east docks let the player walk out over the sea).
       const onPier = p.x > -8 && p.x < 8 && p.z > CITY.beachZ0 && p.z < 282;
+      const onDock = (p.x > 52 && p.x < 68 && p.z > CITY.beachZ0 && p.z < 300)
+        || (p.x > 102 && p.x < 118 && p.z > CITY.beachZ0 && p.z < 300);
       p.x = clampNum(p.x, -CITY.half - 8, CITY.half + 8);
-      p.z = clampNum(p.z, -CITY.half - 8, onPier ? 282 : CITY.beachZ1);
+      p.z = clampNum(p.z, -CITY.half - 8, onPier ? 282 : onDock ? 300 : CITY.beachZ1);
       const c = pushOutOfBuildings(p.x, p.z, PLAYER.radius);
       p.x = c.x;
       p.z = c.z;
     } else {
+      if (p.boatId !== undefined && p.boatId >= 0) return; // on a boat: the boat module moves the player
       const car = playerCar();
       if (!car) {
         p.onFoot = true;
@@ -622,11 +652,13 @@ export function createWorld(random) {
 
   function advanceCar(car, dt, throttle, steer, brake, isPlayer) {
     const maxF = CAR.maxSpeed * (car.kind === 'police' ? 0.85 : 1) * (car.kind === 'rival' ? 0.75 : 1);
+    // Rain makes the roads slick: the weather module publishes state.weather.rain.
+    const wetMaxF = maxF * (state.weather && state.weather.rain ? 1 - 0.28 * state.weather.rain : 1);
     if (throttle > 0) car.speed += CAR.accel * throttle * dt;
     else if (throttle < 0) car.speed += (car.speed > 0.5 ? -CAR.brake : CAR.reverse) * dt;
     else car.speed -= Math.sign(car.speed) * CAR.drag * 4 * dt;
     if (brake) car.speed -= Math.sign(car.speed) * CAR.brake * dt;
-    car.speed = clampNum(car.speed, -CAR.maxReverse, maxF);
+    car.speed = clampNum(car.speed, -CAR.maxReverse, wetMaxF);
     if (Math.abs(car.speed) < 0.05 && throttle === 0) car.speed = 0;
     const targetSteer = steer * CAR.steer;
     car.steer += clampNum(targetSteer - car.steer, -CAR.steerSpeed * dt, CAR.steerSpeed * dt);
