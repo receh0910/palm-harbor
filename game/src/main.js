@@ -25,6 +25,15 @@ import { createWeather } from './weather.js';
 import { createSideJobs } from './sidejobs.js';
 import { createStory2 } from './missions2.js';
 import { createBoats } from './boats.js';
+import { initGangs, updateGangs, serializeGangs, deserializeGangs, gangSummary } from './gangs.js';
+import { initProperties, collectIncome, serializeProperties, deserializeProperties, listOwnedProperties } from './properties.js';
+import { initRacing, updateRacing, serializeRacing, deserializeRacing, bestTime } from './racing.js';
+import { initCustoms, updateCustoms, serializeCustoms, deserializeCustoms, totalSpent } from './customs.js';
+import { GANGS } from './gangs.js';
+import { listAvailableProperties, buyProperty } from './properties.js';
+import { RACES, startRace } from './racing.js';
+import { listPaints, listWheels, listNitroKits, buyPaint, buyWheels, buyNitro, getVehicleMods } from './customs.js';
+import { initSystemMenu } from './menus.js';
 import { stageShot } from './shots.js';
 
 const MAX_FRAME = 0.25;
@@ -47,6 +56,13 @@ const boats = createBoats(world);
 const sideJobs = createSideJobs(world, weather);
 const story2 = createStory2(world, boats, weather);
 renderer.setExtras({ weather, sideJobs, story2, boats });
+
+// Cycle 3 systems: gangs, properties, street racing and vehicle mods.
+// They share the world's wallet (world.state.money) and keep their own state.
+initGangs(world.state);
+initProperties(world.state);
+initRacing(world.state);
+initCustoms(world.state);
 
 function runShot(name) {
   const scene = stageShot(name, world, missions);
@@ -71,6 +87,7 @@ function runGame() {
   let toastTimer = 0;
   let lastTitle = '';
   let boatCtl = {};
+  let incomeClock = 0;
 
   function refreshTabTitle() {
     const cur = missions.done ? story2.current() : missions.current();
@@ -83,6 +100,17 @@ function runGame() {
 
   function say(message) {
     status.textContent = message;
+  }
+
+  function refreshSystemsPanel() {
+    const panel = document.getElementById('systems-text');
+    if (!panel) return;
+    const owned = listOwnedProperties();
+    const income = owned.reduce((sum, item) => sum + item.income, 0);
+    const crimson = gangSummary('crimson');
+    const best = bestTime('harbor-sprint');
+    const bestText = best === null ? '—' : `${best}s`;
+    panel.textContent = `Turf: Crimson holds ${crimson.turf.length} districts · Properties: ${owned.length} owned ($${income}/period) · Best Harbor Sprint: ${bestText} · Mods spent: $${totalSpent()}`;
   }
 
   function toast(text, secs) {
@@ -105,6 +133,8 @@ function runGame() {
       window.localStorage.setItem(SAVE_KEY, JSON.stringify({
         ...world.getSave(), ...missions.getSave(), ...weather.getSave(),
         ...boats.getSave(), ...sideJobs.getSave(), ...story2.getSave(),
+        gangs: serializeGangs(), properties: serializeProperties(),
+        racing: serializeRacing(), customs: serializeCustoms(),
       }));
     } catch {
       /* storage off: the save lasts this visit only */
@@ -126,6 +156,10 @@ function runGame() {
     weather.reset();
     boats.reset();
     sideJobs.reset();
+    initGangs(world.state);
+    initProperties(world.state);
+    initRacing(world.state);
+    initCustoms(world.state);
     accumulator = 0;
     screen = SCREEN_PLAY;
     showScreen(null);
@@ -146,6 +180,10 @@ function runGame() {
     boats.loadSave(save);
     sideJobs.loadSave(save);
     story2.loadSave(save);
+    deserializeGangs(save.gangs);
+    deserializeProperties(save.properties);
+    deserializeRacing(save.racing);
+    deserializeCustoms(save.customs);
     accumulator = 0;
     screen = SCREEN_PLAY;
     showScreen(null);
@@ -286,6 +324,18 @@ function runGame() {
     // Cycle 2 systems run on the same clock as the world.
     weather.update(STEP);
     handleSideJob(sideJobs.update(STEP));
+    // Cycle 3 systems run on the same clock as the world.
+    const warNews = updateGangs(world.state, STEP);
+    if (warNews) toast(`${warNews.districtName} changed hands.`);
+    updateRacing(world.state, STEP);
+    updateCustoms(world.state, STEP);
+    incomeClock += STEP;
+    if (incomeClock >= 120) {
+      incomeClock = 0;
+      const rent = collectIncome(world.state);
+      if (rent.collected > 0) toast(`Properties paid $${rent.collected}.`);
+    }
+    refreshSystemsPanel();
     if (missions.done && !story2.armed && !story2.done) {
       story2.startMission(0);
       toast('Three more jobs wait at the harbor — Job 9: Night Run.', 5);
@@ -397,6 +447,124 @@ function runGame() {
       showScreen('pause-screen');
       say('Paused.');
     }
+  });
+
+  // Cycle 3 triggers: the system menu and what its four buttons do.
+  // Properties carry districts, not coordinates, so the nearest buy is the
+  // cheapest available one; races are picked by their first checkpoint.
+  function buyNearestProperty() {
+    const open = listAvailableProperties(world.state);
+    if (open.length === 0) { toast('You already own every property in Palm Harbor.'); return; }
+    const pick = open.reduce((a, b) => (b.price < a.price ? b : a));
+    const result = buyProperty(pick.id, world.state);
+    if (result.ok) {
+      saveGame();
+      refreshSystemsPanel();
+      toast(`Bought ${result.property} for $${result.paid}. Rent lands every two minutes.`);
+    } else if (result.reason === 'not enough money') {
+      toast('Not enough money for that property yet.');
+    } else {
+      toast(`Could not buy it: ${result.reason}.`);
+    }
+  }
+  function startNearestRace() {
+    const p = world.state.player;
+    let pick = null;
+    let best = Infinity;
+    for (const race of RACES) {
+      const start = race.checkpoints[0];
+      if (!start) continue;
+      const d = (start.x - p.x) * (start.x - p.x) + (start.z - p.z) * (start.z - p.z);
+      if (d < best) { best = d; pick = race.id; }
+    }
+    if (!pick) { toast('No race course is staged right now.'); return; }
+    const result = startRace(pick, world.state);
+    if (result.ok) {
+      saveGame();
+      toast(`${result.race} — entry $${result.entry}. Reach every checkpoint in order.`);
+    } else if (result.reason === 'already racing') {
+      toast('You are already in a race.');
+    } else if (result.reason === 'not enough money') {
+      toast('Not enough money for the entry fee.');
+    } else {
+      toast(`Could not start it: ${result.reason}.`);
+    }
+  }
+  function openOverlayPanel(title) {
+    const old = document.getElementById('menu-overlay-panel');
+    if (old) old.remove();
+    const panel = document.createElement('div');
+    panel.id = 'menu-overlay-panel';
+    panel.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;min-width:320px;max-width:520px;max-height:80vh;overflow:auto;background:#101820;color:#f2f2f2;padding:14px;border:2px solid #e8b23a;border-radius:8px;font-family:sans-serif;';
+    const head = document.createElement('div');
+    head.textContent = title;
+    head.style.cssText = 'font-weight:bold;margin-bottom:10px;';
+    panel.appendChild(head);
+    const content = document.createElement('div');
+    panel.appendChild(content);
+    const closer = document.createElement('button');
+    closer.textContent = 'Close';
+    closer.style.cssText = 'display:block;width:100%;margin-top:10px;padding:8px;cursor:pointer;';
+    closer.addEventListener('click', () => panel.remove());
+    panel.appendChild(closer);
+    document.body.appendChild(panel);
+    return content;
+  }
+  function openWorkshop() {
+    const car = world.playerCar();
+    if (!car) { toast('Get in a car first — the workshop tunes the ride you are driving.'); return; }
+    const vehicleId = car.id;
+    const content = openOverlayPanel('Workshop — tune your ride');
+    const mods = getVehicleMods(vehicleId);
+    const summary = document.createElement('div');
+    summary.textContent = `Current: paint ${mods.paint || 'stock'}, wheels ${mods.wheels || 'stock'}, nitro ${mods.nitro || 'none'} — $${mods.spent} spent on this car.`;
+    summary.style.cssText = 'margin-bottom:10px;';
+    content.appendChild(summary);
+    const groups = [
+      ['Paint', listPaints(), (item) => buyPaint(vehicleId, item.id, world.state)],
+      ['Wheels', listWheels(), (item) => buyWheels(vehicleId, item.id, world.state)],
+      ['Nitro', listNitroKits(), (item) => buyNitro(vehicleId, item.id, world.state)],
+    ];
+    for (const [label, items, buy] of groups) {
+      const heading = document.createElement('div');
+      heading.textContent = label;
+      heading.style.cssText = 'font-weight:bold;margin:8px 0 4px;';
+      content.appendChild(heading);
+      for (const item of items) {
+        const button = document.createElement('button');
+        button.style.cssText = 'display:block;width:100%;text-align:left;margin:3px 0;padding:7px;cursor:pointer;';
+        button.textContent = `${item.name} — $${item.price}`;
+        button.addEventListener('click', () => {
+          const result = buy(item);
+          if (result.ok) {
+            saveGame();
+            refreshSystemsPanel();
+            toast(`Fitted ${item.name} for $${item.price}.`);
+            content.parentElement.remove();
+            openWorkshop();
+          } else {
+            toast(result.reason === 'not enough money' ? 'Not enough money for that part.' : `Could not fit it: ${result.reason}.`);
+          }
+        });
+        content.appendChild(button);
+      }
+    }
+  }
+  function showGangStandings() {
+    const content = openOverlayPanel('Gang standings');
+    for (const gang of GANGS) {
+      const summary = gangSummary(gang.id);
+      const line = document.createElement('div');
+      line.style.cssText = 'margin:6px 0;padding:8px;border-left:4px solid ' + gang.color + ';';
+      line.textContent = `${gang.name} — holds ${summary.turf.length} district${summary.turf.length === 1 ? '' : 's'} (${summary.turf.join(', ') || 'none'}), standing ${summary.reputation}, ${summary.attitude}. Leader: ${gang.leader}.`;
+      content.appendChild(line);
+    }
+  }
+  initSystemMenu({
+    'buy-property': buyNearestProperty,
+    'start-race': startNearestRace,
+    'open-workshop': openWorkshop,
+    'gang-standings': showGangStandings,
   });
 
   refreshTitle();

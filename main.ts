@@ -41,10 +41,28 @@ function fail(message) {
 // game that cannot load.
 const NEW_SYSTEMS = ['weather.js', 'sidejobs.js', 'missions2.js', 'boats.js'];
 
+// Cycle 3 systems, first pair: gangs and properties.
+const CYCLE3_SYSTEMS_A = ['gangs.js', 'properties.js'];
+
+// Cycle 3 systems, second pair: street racing and vehicle mods.
+const CYCLE3_SYSTEMS_B = ['racing.js', 'customs.js'];
+
 function checkNewSystems() {
   for (const name of NEW_SYSTEMS) {
     const p = join(here, 'game', 'src', name);
     if (!existsSync(p)) fail(`game/src/${name} is missing (cycle 2 system)`);
+    const size = statSync(p).size;
+    if (size < 1000) fail(`game/src/${name} is only ${size} bytes, expected a full system`);
+  }
+  for (const name of CYCLE3_SYSTEMS_A) {
+    const p = join(here, 'game', 'src', name);
+    if (!existsSync(p)) fail(`game/src/${name} is missing (cycle 3 system)`);
+    const size = statSync(p).size;
+    if (size < 1000) fail(`game/src/${name} is only ${size} bytes, expected a full system`);
+  }
+  for (const name of CYCLE3_SYSTEMS_B) {
+    const p = join(here, 'game', 'src', name);
+    if (!existsSync(p)) fail(`game/src/${name} is missing (cycle 3 system)`);
     const size = statSync(p).size;
     if (size < 1000) fail(`game/src/${name} is only ${size} bytes, expected a full system`);
   }
@@ -58,6 +76,10 @@ const FEATURES = [
   { id: 'story-2', title: 'Story jobs 9–11', detail: 'Night Run, Storm Chase and Harbor Heist unlock after the first eight jobs, ending in a boat escape.' },
   { id: 'boats', title: 'Drivable boats', detail: 'Three boats at the pier and the east docks; board with E, throttle and steer on open water.' },
   { id: 'harbor-district', title: 'East dock yard', detail: 'Container stacks, three cranes and two walkable timber docks east of the pier.' },
+  { id: 'gangs', title: 'Gangs and turf', detail: 'Three gangs hold six districts, and turf changes hands in wars while your standing with each gang shifts what they offer.' },
+  { id: 'properties', title: 'Buyable properties', detail: 'Buy safehouses and garages across the districts; owned places pay rent every two minutes and add parking slots.' },
+  { id: 'racing', title: 'Street races', detail: 'Unsanctioned night races with entry fees, prize pools and a best-times board for each course.' },
+  { id: 'customs', title: 'Vehicle workshop', detail: 'A workshop for paints, wheels and nitro kits that change how your car looks and how it handles.' },
 ];
 
 function writeFeatures() {
